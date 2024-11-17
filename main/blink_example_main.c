@@ -2,43 +2,25 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/i2c.h"
-#include "driver/ledc.h"
 #include "esp_log.h"
-#include "sdkconfig.h"
 
-static const char* TAG = "motor_sensor_example";
+#define I2C_MASTER_SCL_IO 22      // I2C SCL 핀 번호
+#define I2C_MASTER_SDA_IO 21      // I2C SDA 핀 번호
+#define I2C_MASTER_NUM I2C_NUM_0  // I2C 포트 번호
+#define I2C_MASTER_FREQ_HZ 400000 // I2C 클럭 속도
+#define MPU9250_ADDR 0x68         // MPU9250 I2C 주소
+#define PWR_MGMT_1 0x6B           // 전원 관리 레지스터
+#define ACCEL_XOUT_H 0x3B         // 가속도 데이터 시작 주소
 
-#define MOTOR_GPIO 19                  // 모터가 연결된 GPIO 핀
-#define LEDC_TIMER LEDC_TIMER_0        // LEDC 타이머
-#define LEDC_MODE LEDC_HIGH_SPEED_MODE // 고속 모드
-#define LEDC_CHANNEL LEDC_CHANNEL_0    // LEDC 채널
-#define LEDC_FREQUENCY 5000            // PWM 주파수
-#define MAX_DUTY 8191                  // 최대 Duty 값
-
-// I2C 설정
-#define I2C_MASTER_SCL_IO 22           // I2C SCL 핀
-#define I2C_MASTER_SDA_IO 21           // I2C SDA 핀
-#define I2C_MASTER_NUM I2C_NUM_0       // I2C 포트 번호
-#define I2C_MASTER_FREQ_HZ 100000      // I2C 주파수
-#define MPU9250_ADDRESS 0x68           // MPU9250 I2C 주소
-#define WHO_AM_I_REG 0x75              // 장치 ID 확인 레지스터
-
-// 가속도, 자이로, 자력계 데이터 레지스터 주소
-#define ACCEL_XOUT_H 0x3B
-#define GYRO_XOUT_H 0x43
-#define MAG_XOUT_L 0x03                // AK8963 레지스터 주소 (자력계)
-
-#define PWR_MGMT_1 0x6B
-#define ACCEL_CONFIG 0x1C
-#define GYRO_CONFIG 0x1B
+static const char *TAG = "MPU9250";
 
 // I2C 초기화 함수
 static void i2c_master_init(void) {
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = I2C_MASTER_SDA_IO,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_io_num = I2C_MASTER_SCL_IO,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
         .master.clk_speed = I2C_MASTER_FREQ_HZ,
     };
@@ -46,138 +28,108 @@ static void i2c_master_init(void) {
     i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
 }
 
-static void mpu9250_init(void) {
-    // PWR_MGMT_1 레지스터 초기화 (디바이스 활성화)
+// I2C 레지스터에 값 쓰기
+static esp_err_t i2c_write_byte(uint8_t addr, uint8_t reg, uint8_t data) {
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (MPU9250_ADDRESS << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, PWR_MGMT_1, true);
-    i2c_master_write_byte(cmd, 0x00, true); // 잠금 해제 (내부 클럭 사용)
+    i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, reg, true);
+    i2c_master_write_byte(cmd, data, true);
     i2c_master_stop(cmd);
+    esp_err_t ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, 1000 / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(cmd);
-
-    // 가속도 설정 (±2g 설정)
-    cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (MPU9250_ADDRESS << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, ACCEL_CONFIG, true);
-    i2c_master_write_byte(cmd, 0x00, true); // ±2g
-    i2c_master_stop(cmd);
-    i2c_cmd_link_delete(cmd);
-
-    // 자이로 설정 (±250°/s 설정)
-    cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (MPU9250_ADDRESS << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, GYRO_CONFIG, true);
-    i2c_master_write_byte(cmd, 0x00, true); // ±250°/s
-    i2c_master_stop(cmd);
-    i2c_cmd_link_delete(cmd);
-
-    ESP_LOGI(TAG, "MPU9250 초기화 완료");
+    return ret;
 }
 
-
-// 레지스터에서 16비트 데이터 읽기 함수
-static int16_t mpu9250_read_16bit(uint8_t high_addr) {
-    uint8_t high_byte, low_byte;
+// I2C 레지스터에서 다중 바이트 읽기
+static esp_err_t i2c_read_bytes(uint8_t addr, uint8_t reg, uint8_t *data, size_t len) {
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (MPU9250_ADDRESS << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, high_addr, true);
+    i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, reg, true);
     i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (MPU9250_ADDRESS << 1) | I2C_MASTER_READ, true);
-    i2c_master_read_byte(cmd, &high_byte, I2C_MASTER_ACK);
-    i2c_master_read_byte(cmd, &low_byte, I2C_MASTER_NACK);
+    i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_READ, true);
+    i2c_master_read(cmd, data, len, I2C_MASTER_LAST_NACK);
     i2c_master_stop(cmd);
+    esp_err_t ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, 1000 / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(cmd);
-
-    return (int16_t)((high_byte << 8) | low_byte);
-}
-
-// 가속도, 자이로, 자력계 데이터 읽기 함수
-static void read_mpu9250_data(void) {
-    int16_t accel_x = mpu9250_read_16bit(ACCEL_XOUT_H);
-    int16_t accel_y = mpu9250_read_16bit(ACCEL_XOUT_H + 2);
-    int16_t accel_z = mpu9250_read_16bit(ACCEL_XOUT_H + 4);
-
-    int16_t gyro_x = mpu9250_read_16bit(GYRO_XOUT_H);
-    int16_t gyro_y = mpu9250_read_16bit(GYRO_XOUT_H + 2);
-    int16_t gyro_z = mpu9250_read_16bit(GYRO_XOUT_H + 4);
-
-    ESP_LOGI(TAG, "가속도 (X, Y, Z): %d, %d, %d", accel_x, accel_y, accel_z);
-    ESP_LOGI(TAG, "자이로 (X, Y, Z): %d, %d, %d", gyro_x, gyro_y, gyro_z);
-}
-
-// 모터 설정 함수
-static void configure_motor(void) {
-    ledc_timer_config_t ledc_timer = {
-        .speed_mode = LEDC_MODE,
-        .timer_num = LEDC_TIMER,
-        .duty_resolution = LEDC_TIMER_13_BIT,
-        .freq_hz = LEDC_FREQUENCY,
-        .clk_cfg = LEDC_AUTO_CLK
-    };
-    ledc_timer_config(&ledc_timer);
-
-    ledc_channel_config_t ledc_channel = {
-        .speed_mode = LEDC_MODE,
-        .channel = LEDC_CHANNEL,
-        .timer_sel = LEDC_TIMER,
-        .intr_type = LEDC_INTR_DISABLE,
-        .gpio_num = MOTOR_GPIO,
-        .duty = 0,
-        .hpoint = 0
-    };
-    ledc_channel_config(&ledc_channel);
+    return ret;
 }
 
 void app_main(void) {
+    uint8_t raw_data[14];
+    int16_t accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z;
+    int16_t offset_ax = 0, offset_ay = 0, offset_az = 0;
+    int16_t offset_gx = 0, offset_gy = 0, offset_gz = 0;
+    const int sample_count = 2000; // 샘플 개수
+    esp_err_t ret;
+
     // I2C 초기화
     i2c_master_init();
-    mpu9250_init();
-    // MPU9250 WHO_AM_I 레지스터 확인
-    uint8_t who_am_i;
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (MPU9250_ADDRESS << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, WHO_AM_I_REG, true);
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (MPU9250_ADDRESS << 1) | I2C_MASTER_READ, true);
-    i2c_master_read_byte(cmd, &who_am_i, I2C_MASTER_NACK);
-    i2c_master_stop(cmd);
-    i2c_cmd_link_delete(cmd);
 
-    if (who_am_i == 0x71) {
-        ESP_LOGI(TAG, "MPU9250 연결 성공!");
-    } else {
-        ESP_LOGE(TAG, "MPU9250 연결 실패. WHO_AM_I: 0x%02X", who_am_i);
+    // MPU9250 초기화
+    ret = i2c_write_byte(MPU9250_ADDR, PWR_MGMT_1, 0x00);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "MPU9250 초기화 실패");
+        return;
+    }
+    ESP_LOGI(TAG, "MPU9250 초기화 성공");
+
+    // 초기 데이터 수집 및 오프셋 계산
+    ESP_LOGI(TAG, "초기 데이터 수집 시작...");
+    int32_t sum_ax = 0, sum_ay = 0, sum_az = 0;
+    int32_t sum_gx = 0, sum_gy = 0, sum_gz = 0;
+
+    for (int i = 0; i < sample_count; i++) {
+        ret = i2c_read_bytes(MPU9250_ADDR, ACCEL_XOUT_H, raw_data, 14);
+        if (ret == ESP_OK) {
+            accel_x = (raw_data[0] << 8) | raw_data[1];
+            accel_y = (raw_data[2] << 8) | raw_data[3];
+            accel_z = (raw_data[4] << 8) | raw_data[5];
+            gyro_x = (raw_data[8] << 8) | raw_data[9];
+            gyro_y = (raw_data[10] << 8) | raw_data[11];
+            gyro_z = (raw_data[12] << 8) | raw_data[13];
+
+            sum_ax += accel_x;
+            sum_ay += accel_y;
+            sum_az += accel_z;
+            sum_gx += gyro_x;
+            sum_gy += gyro_y;
+            sum_gz += gyro_z;
+        } else {
+            ESP_LOGE(TAG, "센서 데이터 읽기 실패");
+        }
+        vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 
-    // 모터 설정
-    configure_motor();
+    offset_ax = sum_ax / sample_count;
+    offset_ay = sum_ay / sample_count;
+    offset_az = sum_az / sample_count;
+    offset_gx = sum_gx / sample_count;
+    offset_gy = sum_gy / sample_count;
+    offset_gz = sum_gz / sample_count;
 
+    ESP_LOGI(TAG, "초기 데이터 수집 완료!");
+    ESP_LOGI(TAG, "Accel 오프셋 (X,Y,Z): %6d %6d %6d", offset_ax, offset_ay, offset_az);
+    ESP_LOGI(TAG, "Gyro 오프셋 (X,Y,Z): %6d %6d %6d", offset_gx, offset_gy, offset_gz);
+
+    // 센서 데이터 읽기 및 보정
     while (1) {
-        ESP_LOGI(TAG, "모터 속도를 증가시킵니다.");
-        for (int duty = 0; duty <= MAX_DUTY; duty += 500) {
-            ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, duty);
-            ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
+        ret = i2c_read_bytes(MPU9250_ADDR, ACCEL_XOUT_H, raw_data, 14);
+        if (ret == ESP_OK) {
+            accel_x = ((raw_data[0] << 8) | raw_data[1]) - offset_ax;
+            accel_y = ((raw_data[2] << 8) | raw_data[3]) - offset_ay;
+            accel_z = ((raw_data[4] << 8) | raw_data[5]) - offset_az;
+            gyro_x = ((raw_data[8] << 8) | raw_data[9]) - offset_gx;
+            gyro_y = ((raw_data[10] << 8) | raw_data[11]) - offset_gy;
+            gyro_z = ((raw_data[12] << 8) | raw_data[13]) - offset_gz;
 
-            // MPU9250 가속도, 자이로 데이터 읽기
-            read_mpu9250_data();
-
-            vTaskDelay(100 / portTICK_PERIOD_MS); // 100ms 대기
+            ESP_LOGI(TAG, "Accel (X,Y,Z): %6d %6d %6d | Gyro (X,Y,Z): %6d %6d %6d",
+                     accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z);
+        } else {
+            ESP_LOGE(TAG, "센서 데이터 읽기 실패");
         }
-
-        ESP_LOGI(TAG, "모터 속도를 감소시킵니다.");
-        for (int duty = MAX_DUTY; duty >= 0; duty -= 500) {
-            ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, duty);
-            ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
-
-            // MPU9250 가속도, 자이로 데이터 읽기
-            read_mpu9250_data();
-
-            vTaskDelay(100 / portTICK_PERIOD_MS); // 100ms 대기
-        }
+        vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }
+
