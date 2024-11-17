@@ -16,6 +16,6 @@ void app_main(void) {
     BaseType_t task2 = xTaskCreate(TaskMotor, "MOTOR", 2048, NULL, 5, NULL);
 
     while (1) {
-        vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay to prevent hogging the CPU
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }

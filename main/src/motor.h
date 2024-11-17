@@ -9,6 +9,7 @@
 #define LEDC_CHANNEL LEDC_CHANNEL_0    // LEDC 채널
 #define LEDC_FREQUENCY 5000            // PWM 주파수
 #define MAX_DUTY 2048
+#define DELAY_MOTOR 100
 
 void init_motor(void);
 void TaskMotor(void*);
