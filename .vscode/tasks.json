@@ -1,0 +1,45 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build ESP-IDF Project",
+			"type": "shell",
+			"command": "idf.py",
+			"args": [
+				"build"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": [
+				"$gcc"
+			]
+		},
+		{
+			"label": "Flash ESP-IDF Project",
+			"type": "shell",
+			"command": "idf.py",
+			"args": [
+				"flash"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": false
+			},
+			"problemMatcher": [
+				"$gcc"
+			]
+		},
+		{
+			"label": "Monitor ESP-IDF Project",
+			"type": "shell",
+			"command": "idf.py",
+			"args": [
+				"monitor"
+			],
+			"group": "none",
+			"problemMatcher": []
+		}
+	]
+}
