@@ -7,7 +7,9 @@
                 "/Users/dawoonjang/esp/v5.3.1/esp-idf/components/**",
                 "/Users/dawoonjang/esp/v5.3.1/esp-idf/components/freertos",
                 "/Users/dawoonjang/esp/v5.3.1/esp-idf/components/driver",
-                "/Users/dawoonjang/esp/v5.3.1/esp-idf/components/hal"
+                "/Users/dawoonjang/esp/v5.3.1/esp-idf/components/hal",
+                "/Users/dawoonjang/esp/v5.3.1/esp-idf/components/esp_driver_i2c",
+                "/Users/dawoonjang/esp/v5.3.1/esp-idf/components/esp_events"
             ],
             "defines": [],
             "compilerPath": "/Users/dawoonjang/esp/tools/tools/xtensa-esp-elf/esp-13.2.0_20240530/xtensa-esp-elf/bin/xtensa-esp32-elf-gcc",

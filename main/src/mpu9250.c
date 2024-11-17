@@ -8,6 +8,10 @@ bool bIsCalibrated;
 static esp_err_t _i2c_write_byte(uint8_t, uint8_t, uint8_t);
 static esp_err_t _i2c_read_bytes(uint8_t, uint8_t, uint8_t*, size_t);
 
+bool getbIsCalibrated(void) {
+    return bIsCalibrated;
+}
+
 void init_i2c_master(void) {
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
@@ -48,7 +52,6 @@ static esp_err_t _i2c_read_bytes(uint8_t addr, uint8_t reg, uint8_t* data, size_
 }
 
 void TaskMPU9250(void* pvParameters) {
-    static bool bIsCalibrated = false;
     static UINT16 sample_count = 0;
 
     static SINT16 offset_ax, offset_ay, offset_az,

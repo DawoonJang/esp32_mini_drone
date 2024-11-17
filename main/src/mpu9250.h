@@ -26,4 +26,6 @@ typedef struct _st_mpu9250 {
 
 void init_i2c_master(void);
 void TaskMPU9250(void*);
+bool getbIsCalibrated(void);
+
 #endif /* mpu9250.h */
