@@ -12,7 +12,8 @@ void app_main(void) {
     init_i2c_master();
     init_motor();
 
-    BaseType_t ret = xTaskCreate(TaskMPU9250, "MPU9250", 2048, NULL, 5, NULL);
+    BaseType_t task1 = xTaskCreate(TaskMPU9250, "MPU9250", 2048, NULL, 5, NULL);
+    BaseType_t task2 = xTaskCreate(TaskMotor, "MOTOR", 2048, NULL, 5, NULL);
 
     while (1) {
         vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay to prevent hogging the CPU

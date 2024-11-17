@@ -1,4 +1,7 @@
 #include "motor.h"
+#include "mpu9250.h"
+
+static const char* TAG = "Motor";
 
 void init_motor(void) {
     ledc_timer_config_t ledc_timer = {
@@ -22,23 +25,18 @@ void init_motor(void) {
     ledc_channel_config(&ledc_channel);
 }
 
-// ESP_LOGI(TAG, "모터 속도를 증가시킵니다.");
-// for (int duty = 0; duty <= MAX_DUTY; duty += 500) {
-//     ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, duty);
-//     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
+void TaskMotor(void* pvParameters) {
 
-//     // MPU9250 가속도, 자이로 데이터 읽기
-//     read_mpu9250_data();
+    while (1)
+    {
+        if (!getbIsCalibrated()) {
+            vTaskDelay(DELAY_MOTOR / portTICK_PERIOD_MS);
+            continue;
+        }
 
-//     vTaskDelay(100 / portTICK_PERIOD_MS); // 100ms 대기
-// }
+        ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, 2048);
+        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
 
-// ESP_LOGI(TAG, "모터 속도를 감소시킵니다.");
-// for (int duty = MAX_DUTY; duty >= 0; duty -= 500) {
-//     ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, duty);
-//     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
-
-//     // MPU9250 가속도, 자이로 데이터 읽기
-//     read_mpu9250_data();
-
-//     vTaskDelay(100 / portTICK_PERIOD_MS); // 100ms 대기
+        vTaskDelay(DELAY_MOTOR / portTICK_PERIOD_MS);
+    }
+}
